@@ -54,6 +54,7 @@ setup(
         'tornado': ['tornado >= 4.3'],
         'twisted': ['twisted'],
         'zookeeper': ['kazoo'],
+        'elasticsearch_js': ['elasticsearch >= 6.3.1'],
         'testing': [
             'pytest < 3.7',
             'pytest-cov',
@@ -91,7 +92,8 @@ setup(
             'mongodb = apscheduler.jobstores.mongodb:MongoDBJobStore [mongodb]',
             'rethinkdb = apscheduler.jobstores.rethinkdb:RethinkDBJobStore [rethinkdb]',
             'redis = apscheduler.jobstores.redis:RedisJobStore [redis]',
-            'zookeeper = apscheduler.jobstores.zookeeper:ZooKeeperJobStore [zookeeper]'
+            'zookeeper = apscheduler.jobstores.zookeeper:ZooKeeperJobStore [zookeeper]',
+            'elasticsearch_js = apscheduler.jobstores.elasticsearch_js:ElasticsearchJobStore [elasticsearch_js]'
         ]
     }
 )

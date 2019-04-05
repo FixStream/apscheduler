@@ -211,6 +211,10 @@ def datetime_repr(dateval):
     return dateval.strftime('%Y-%m-%d %H:%M:%S %Z') if dateval else 'None'
 
 
+def str_to_datetime(dateval):
+    return datetime.strptime(dateval.strip(), '%Y-%m-%d %H:%M:%S') if dateval else 'None'
+
+
 def get_callable_name(func):
     """
     Returns the best available display name for the given function/callable.
