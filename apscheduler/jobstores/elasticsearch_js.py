@@ -2,11 +2,12 @@ from __future__ import absolute_import
 import warnings
 
 from pytz import timezone
-from elasticsearch import Elasticsearch, helpers
+from elasticsearch import Elasticsearch
 
 from apscheduler.job import Job
 from apscheduler.triggers.date import DateTrigger
-from apscheduler.util import (maybe_ref, datetime_repr, str_to_datetime, utc_timestamp_to_datetime,
+from apscheduler.util import (maybe_ref, datetime_repr, str_to_datetime,
+                              utc_timestamp_to_datetime,
                               datetime_to_utc_timestamp)
 from apscheduler.jobstores.base import BaseJobStore, ConflictingIdError
 
@@ -14,7 +15,6 @@ try:
     import cPickle as pickle
 except ImportError:  # pragma: nocover
     import pickle
-
 
 try:
     from elasticsearch.exceptions import NotFoundError, RequestError
@@ -48,7 +48,6 @@ class ElasticsearchJobStore(BaseJobStore):
 
     def start(self, scheduler, alias):
         super(ElasticsearchJobStore, self).start(scheduler, alias)
-        # self.collection.ensure_index('next_run_time', sparse=True)
 
     def create_index(self, index_name):
 
@@ -64,18 +63,9 @@ class ElasticsearchJobStore(BaseJobStore):
 
         return response
 
-    def fetch_by_id(self, id):
-
-        try:
-            self.client.get(index=self.index, doc_type=self.doc_type, id=id)
-        except NotFoundError:
-            return False
-
-        return True
-
     def add_job(self, job):
 
-        if self.fetch_by_id(job.id):
+        if self.fetch_by_id(self.index, self.doc_type, job.id):
             raise ConflictingIdError(job.id)
 
         job_obj = job.__getstate__()
@@ -91,12 +81,21 @@ class ElasticsearchJobStore(BaseJobStore):
             'job_state': job_obj
         }
 
-        self.client.index(index=self.index, doc_type=self.doc_type, body=job_body, id=job_body['id'])
+        self.client.index(index=self.index, doc_type=self.doc_type, body=job_body,
+                          id=job_body['id'])
 
     def get_due_jobs(self, now):
         timestamp = datetime_to_utc_timestamp(now)
-        # return self._get_jobs({'next_run_time': {'$lte': timestamp}})
-        due_jobs = self._get_jobs({})
+        _condition = {
+            "query": {
+                "range": {
+                    "next_run_time": {
+                        "lte": timestamp
+                    }
+                }
+            }
+        }
+        due_jobs = self._get_jobs(_condition)
         return due_jobs
 
     def get_all_jobs(self):
@@ -108,22 +107,19 @@ class ElasticsearchJobStore(BaseJobStore):
         jobs = []
         failed_job_ids = []
 
-        response = self.fetch_all(self.index, self.doc_type)
-        total_jobs = self.data_cleansing(response)
+        if conditions:
+            response = self.fetch_by_condition(self.index, self.doc_type, conditions)
+        else:
+            response = self.fetch_all(self.index, self.doc_type)
 
+        total_jobs = self.data_cleansing(response)
 
         for each_job in total_jobs:
 
             job_state = each_job['_source']['job_state']
-            job_state['next_run_time'] = utc_timestamp_to_datetime(job_state['next_run_time'])
-            trigger = job_state['trigger']
-            run_date = str_to_datetime(trigger['run_date'])
-            time_zone = timezone(trigger['timezone'])
-            dt = DateTrigger(run_date, time_zone)
-            job_state['trigger'] = dt
 
             try:
-                job_obj = self._reconstitute_job(job_state)
+                job_obj = self.create_date_trigger_obj(job_state)
                 jobs.append(job_obj)
             except BaseException as be:
                 self._logger.exception('Unable to restore job "%s" -- removing it',
@@ -135,6 +131,20 @@ class ElasticsearchJobStore(BaseJobStore):
 
         return jobs
 
+    def create_date_trigger_obj(self, job_state):
+
+        trigger = job_state['trigger']
+        time_zone = timezone(trigger['timezone'])
+        run_date = str_to_datetime(trigger['run_date'])
+        job_state['next_run_time'] = utc_timestamp_to_datetime(job_state['next_run_time'])
+
+        dt = DateTrigger(run_date, time_zone)
+        job_state['trigger'] = dt
+
+        job_obj = self._reconstitute_job(job_state)
+
+        return job_obj
+
     def _reconstitute_job(self, job_state):
         job = Job.__new__(Job)
         job.__setstate__(job_state)
@@ -143,32 +153,111 @@ class ElasticsearchJobStore(BaseJobStore):
         return job
 
     def get_next_run_time(self):
-        pass
+        next_run_time = None
+        _condition = {
+            "query": {
+                "range": {
+                    "next_run_time": {
+                        "gt": 0
+                    }
+                }
+            }
+        }
+        response = self.fetch_by_condition(self.index, self.doc_type, _condition, size=1)
+        if response:
+            hits = self.data_cleansing(response)
+            if hits:
+                next_run_time = hits[0]['_source']['next_run_time']
+
+        return utc_timestamp_to_datetime(next_run_time) if next_run_time else None
 
     def lookup_job(self, job_id):
-        pass
+        response = self.fetch_by_id(self.index, self.doc_type, job_id)
+        return self.create_date_trigger_obj(response['job_state'])
 
     def remove_all_jobs(self):
-        pass
+        self.delete_all(self.index, self.doc_type)
 
     def remove_job(self, job_id):
-        pass
+        self.delete_by_id(self.index, self.doc_type, job_id)
 
     def update_job(self, job):
-        pass
+        job_obj = job.__getstate__()
+        job_obj['next_run_time'] = datetime_to_utc_timestamp(job.next_run_time)
+
+        run_date = datetime_repr(job_obj['trigger']._run_date)
+        timezone = str(job_obj['trigger']._timezone)
+        job_obj['trigger'] = {'run_date': run_date, 'timezone': timezone}
+
+        job_body = {
+            'next_run_time': datetime_to_utc_timestamp(job.next_run_time),
+            'job_state': job_obj
+        }
+
+        self.client.update(index=self.index, doc_type=self.doc_type,
+                           id=job.id, body=job_body)
 
 
-    def fetch_all(self, index, doc_type):
-        res = self.client.search(index=index, doc_type=doc_type, body={
-            'size': 1000,
+    def fetch_all(self, index, doc_type, size=1000):
+        _body = {
+            'size': size,
             'query': {
                 'match_all': {}
             },
-            'sort': [{ 'next_run_time': {'order' : 'asc'}}]
+            'sort': [
+                {'next_run_time':
+                    {
+                        'order': 'asc'
+                    }
+                }
+            ]
 
-        })
+        }
+        res = self.client.search(index=index, doc_type=doc_type, body=_body)
 
         return res
+
+    def fetch_by_id(self, index, doc_type, id):
+        try:
+            response = self.client.get(index=index, doc_type=doc_type, id=id)
+        except NotFoundError:
+            return
+
+        if '_source' in response:
+            return response['_source']
+
+        return
+
+    def fetch_by_condition(self, index, doc_type,  condition, size=1000):
+        _body = {
+            'size': size,
+            'sort': [
+                {'next_run_time':
+                    {
+                        'order': 'asc'
+                    }
+                }
+            ]
+
+        }
+        _body.update(condition)
+
+        res = self.client.search(index=index, doc_type=doc_type, body=_body)
+
+        return res
+
+    def delete_all(self, index, doc_type):
+        _body = {
+          "query": {
+            "match_all": {}
+          }
+        }
+
+        self.client.delete_by_query(index, _body, doc_type)
+
+    def delete_by_id(self, index, doc_type, id):
+
+        self.client.delete(index, doc_type, id)
 
     def data_cleansing(self, data):
 
