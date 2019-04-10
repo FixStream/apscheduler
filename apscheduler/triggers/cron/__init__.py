@@ -43,11 +43,19 @@ class CronTrigger(BaseTrigger):
         'second': BaseField
     }
 
-    __slots__ = 'timezone', 'start_date', 'end_date', 'fields', 'jitter'
+    __slots__ = 'timezone', 'start_date', 'end_date', 'fields', 'jitter', 'init_params'
 
     def __init__(self, year=None, month=None, day=None, week=None, day_of_week=None, hour=None,
                  minute=None, second=None, start_date=None, end_date=None, timezone=None,
                  jitter=None):
+
+        self.init_params = {'year': year, 'month': month, 'day': day,
+                            'week': week, 'day_of_week': day_of_week,
+                            'hour': hour, 'minute': minute,
+                            'second': second, 'start_date': start_date,
+                            'end_date': end_date, 'timezone': timezone,
+                            'jitter': jitter}
+
         if timezone:
             self.timezone = astimezone(timezone)
         elif isinstance(start_date, datetime) and start_date.tzinfo:

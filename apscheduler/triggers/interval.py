@@ -23,10 +23,14 @@ class IntervalTrigger(BaseTrigger):
     :param int|None jitter: advance or delay the job execution by ``jitter`` seconds at most.
     """
 
-    __slots__ = 'timezone', 'start_date', 'end_date', 'interval', 'interval_length', 'jitter'
+    __slots__ = 'timezone', 'start_date', 'end_date', 'interval', 'interval_length', 'jitter', 'init_params'
 
     def __init__(self, weeks=0, days=0, hours=0, minutes=0, seconds=0, start_date=None,
                  end_date=None, timezone=None, jitter=None):
+        self.init_params = {'weeks': weeks, 'days': days, 'hours': hours,
+                            'minutes': minutes, 'seconds': seconds,
+                            'start_date': start_date, 'end_date': end_date,
+                            'timezone': timezone, 'jitter': jitter}
         self.interval = timedelta(weeks=weeks, days=days, hours=hours, minutes=minutes,
                                   seconds=seconds)
         self.interval_length = timedelta_seconds(self.interval)
