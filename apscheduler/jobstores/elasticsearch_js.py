@@ -71,32 +71,7 @@ class ElasticsearchJobStore(BaseJobStore):
         if self.fetch_by_id(self.index, self.doc_type, job.id):
             raise ConflictingIdError(job.id)
 
-        trigger_type = None
-
-        job_obj = job.__getstate__()
-        job_obj['next_run_time'] = datetime_to_utc_timestamp(job.next_run_time)
-
-        if isinstance(job.trigger, DateTrigger):
-            timezone = str(job_obj['trigger']._timezone)
-            run_date = datetime_repr(job_obj['trigger']._run_date)
-            job_obj['trigger'] = {'run_date': run_date, 'timezone': timezone}
-            trigger_type = 'DateTrigger'
-
-        elif isinstance(job.trigger, IntervalTrigger):
-            init_params = job_obj['trigger'].init_params
-            init_params['start_date'] = datetime_repr(init_params['start_date']) if init_params['start_date'] else None
-            init_params['end_date'] = datetime_repr(init_params['end_date']) if init_params['end_date'] else None
-            init_params['timezone'] = str(init_params['timezone']) if init_params['timezone'] else None
-            job_obj['trigger'] = init_params
-            trigger_type = 'IntervalTrigger'
-
-        elif isinstance(job.trigger, CronTrigger):
-            init_params = job_obj['trigger'].init_params
-            init_params['start_date'] = datetime_repr(init_params['start_date']) if init_params['start_date'] else None
-            init_params['end_date'] = datetime_repr(init_params['end_date']) if init_params['end_date'] else None
-            init_params['timezone'] = str(init_params['timezone']) if init_params['timezone'] else None
-            job_obj['trigger'] = init_params
-            trigger_type = 'CronTrigger'
+        trigger_type, job_obj = self.serialize_job_obj(job)
 
         job_body = {
             'id': job.id,
@@ -235,21 +210,48 @@ class ElasticsearchJobStore(BaseJobStore):
         self.delete_by_id(self.index, self.doc_type, job_id)
 
     def update_job(self, job):
-        job_obj = job.__getstate__()
-        job_obj['next_run_time'] = datetime_to_utc_timestamp(job.next_run_time)
-
-        run_date = datetime_repr(job_obj['trigger']._run_date)
-        timezone = str(job_obj['trigger']._timezone)
-        job_obj['trigger'] = {'run_date': run_date, 'timezone': timezone}
+        _, job_obj = self.serialize_job_obj(job)
 
         job_body = {
             'next_run_time': datetime_to_utc_timestamp(job.next_run_time),
             'job_state': job_obj
         }
 
+        job_body = {'doc': job_body}
+
         self.client.update(index=self.index, doc_type=self.doc_type,
                            id=job.id, body=job_body)
 
+    def serialize_job_obj(self, job):
+        trigger_type = None
+
+        job_obj = job.__getstate__()
+        job_obj['next_run_time'] = datetime_to_utc_timestamp(job.next_run_time)
+
+        if isinstance(job.trigger, DateTrigger):
+            init_params = job_obj['trigger'].init_params
+            timezone = str(init_params['timezone'])
+            run_date = datetime_repr(init_params['run_date'])
+            job_obj['trigger'] = {'run_date': run_date, 'timezone': timezone}
+            trigger_type = 'DateTrigger'
+
+        elif isinstance(job.trigger, IntervalTrigger):
+            init_params = job_obj['trigger'].init_params
+            init_params['start_date'] = datetime_repr(init_params['start_date']) if init_params['start_date'] else None
+            init_params['end_date'] = datetime_repr(init_params['end_date']) if init_params['end_date'] else None
+            init_params['timezone'] = str(init_params['timezone']) if init_params['timezone'] else None
+            job_obj['trigger'] = init_params
+            trigger_type = 'IntervalTrigger'
+
+        elif isinstance(job.trigger, CronTrigger):
+            init_params = job_obj['trigger'].init_params
+            init_params['start_date'] = datetime_repr(init_params['start_date']) if init_params['start_date'] else None
+            init_params['end_date'] = datetime_repr(init_params['end_date']) if init_params['end_date'] else None
+            init_params['timezone'] = str(init_params['timezone']) if init_params['timezone'] else None
+            job_obj['trigger'] = init_params
+            trigger_type = 'CronTrigger'
+
+        return trigger_type, job_obj
 
     def fetch_all(self, index, doc_type, size=1000):
         _body = {
