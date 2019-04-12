@@ -311,8 +311,10 @@ class ElasticsearchJobStore(BaseJobStore):
         self.client.delete_by_query(index, _body, doc_type)
 
     def delete_by_id(self, index, doc_type, id):
-
-        self.client.delete(index, doc_type, id)
+        try:
+            self.client.delete(index, doc_type, id)
+        except NotFoundError:
+            pass
 
     def data_cleansing(self, data):
 

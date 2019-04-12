@@ -212,7 +212,11 @@ def datetime_repr(dateval):
 
 
 def str_to_datetime(dateval):
-    return datetime.strptime(dateval.strip(), '%Y-%m-%d %H:%M:%S') if dateval else 'None'
+    try:
+        return datetime.strptime(dateval.strip(), '%Y-%m-%d %H:%M:%S') if dateval else 'None'
+    except ValueError:
+        return datetime.strptime(dateval.strip(),
+                                 '%Y-%m-%d %H:%M:%S %Z') if dateval else 'None'
 
 
 def get_callable_name(func):
